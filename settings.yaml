@@ -1,0 +1,12 @@
+tesseract:
+    data directory: /usr/share/tesseract-ocr/4.00/tessdata
+    recognition language: eng
+    ocr engine mode: 3
+
+input image processing:
+    scale factor: 1
+    invert: no
+    grayscale: no
+    blackwhite: no
+    blackwhite threshold: 200
+
