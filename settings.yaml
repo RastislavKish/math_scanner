@@ -1,5 +1,5 @@
 tesseract:
-    data directory: /usr/share/tesseract-ocr/4.00/tessdata
+    data directory: default
     recognition language: eng
     ocr engine mode: 3
 

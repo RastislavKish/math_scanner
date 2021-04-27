@@ -62,13 +62,13 @@ class ImageProcessingConfiguration:
         self.blackwhite_threshold=blackwhite_threshold
 class TesseractConfiguration:
 
-    def __init__(self, data_directory="/usr/share/tesseract-ocr/4.00/tessdata", recognition_language="eng", ocr_engine_mode=3):
+    def __init__(self, data_directory="", recognition_language="eng", ocr_engine_mode=3):
         self.data_directory=data_directory
         self.recognition_language=recognition_language
         self.ocr_engine_mode=ocr_engine_mode
 
     def set_data_directory(self, data_directory):
-        self.data_directory=data_directory
+        self.data_directory=data_directory if data_directory!="default" else ""
     def set_recognition_language(self, recognition_language):
         self.recognition_language=recognition_language
     def set_ocr_engine_mode(self, ocr_engine_mode):
@@ -148,32 +148,32 @@ class CharacterBox:
     def character(self): return self._character
 
     @property
-    def top_left_x(self): return self._top_left_x
+    def bottom_left_x(self): return self._bottom_left_x
 
     @property
-    def top_left_y(self): return self._top_left_y
+    def bottom_left_y(self): return self._bottom_left_y
 
     @property
-    def bottom_right_x(self): return self._bottom_right_x
+    def top_right_x(self): return self._top_right_x
 
     @property
-    def bottom_right_y(self): return self._bottom_right_y
+    def top_right_y(self): return self._top_right_y
 
     @property
     def height(self):
-        return abs(self._top_left_y-self._bottom_right_y)
+        return abs(self._top_right_y-self._bottom_left_y)
 
     @property
     def width(self):
-        return abs(self._bottom_right_x-self._top_left_x)
+        return abs(self._top_right_x-self._bottom_left_x)
 
-    def __init__(self, character, top_left_x, top_left_y, bottom_right_x, bottom_right_y):
+    def __init__(self, character, bottom_left_x, bottom_left_y, top_right_x, top_right_y):
 
         self._character=character
-        self._top_left_x=top_left_x
-        self._top_left_y=top_left_y
-        self._bottom_right_x=bottom_right_x
-        self._bottom_right_y=bottom_right_y
+        self._bottom_left_x=bottom_left_x
+        self._bottom_left_y=bottom_left_y
+        self._top_right_x=top_right_x
+        self._top_right_y=top_right_y
     def from_list(l):
         if len(l)>=5:
             return CharacterBox(l[0], int(l[1]), int(l[2]), int(l[3]), int(l[4]))
@@ -181,11 +181,11 @@ class CharacterBox:
             raise ValueError(f"CharacterBox can't be constructed from list of {len(l)} elements.")
 
     def is_on_line(self, line_y):
-        return True if line_y>=self._top_left_y and line_y<=self._bottom_right_y else False
+        return line_y>=self._bottom_left_y and line_y<=self._top_right_y
 
 def segment_image(image):
 
-    # First, recognize the input image and parse the bounding boxes of individual characters
+    # First, recognize the input image and parse the bounding boxes of individual characters. We currently don't need the page number entry, so will take just the first 5 entries of each row of image_to_boxes.
 
     boxes=pytesseract.image_to_boxes(image, lang="slk")
     characters=[CharacterBox.from_list(i.split(" ")[:5]) for i in boxes.split("\n") if len(i.split(" "))==6]
@@ -214,7 +214,7 @@ def segment_image(image):
         if ch==None:
             break
 
-        line_y=ch.bottom_right_y-int(ch.height/2)
+        line_y=ch.bottom_left_y+int(ch.height/2)
 
         lines[line_y]=[ch]
 
@@ -224,14 +224,14 @@ def segment_image(image):
             if characters[i].is_on_line(line_y):
                 lines[line_y].append(characters[i])
                 del characters[i]
-                i-=1
+                continue
             i+=1
 
     # Some characters, such as commas or periods have smaller  boxes and therefore could be missed by the middle axes of bigger characters. Thus, they need to be assigned to the nearest available line
 
     for ch in characters:
 
-        ch_middle_line=ch.top_left_y+int(ch.height/2)
+        ch_middle_line=ch.top_right_y-int(ch.height/2)
 
         min_delta=None
         min_delta_key=None
@@ -252,7 +252,7 @@ def segment_image(image):
     # We need to sort characters in individual lines
 
     for key in lines.keys():
-        lines[key].sort(key=lambda i: i.top_left_x+int(i.width/2))
+        lines[key].sort(key=lambda i: i.bottom_left_x+int(i.width/2))
 
     # And now add spaces
 
@@ -265,25 +265,144 @@ def segment_image(image):
             ch_1=line[i]
             ch_2=line[i+1]
 
-            characters_distance=ch_2.top_left_x-ch_1.bottom_right_x
+            characters_distance=ch_2.bottom_left_x-ch_1.top_right_x
 
             if characters_distance>=space_width:
-                space_character=CharacterBox(" ", ch_1.bottom_right_x, ch_1.top_left_y, ch_2.top_left_x, ch_2.bottom_right_y)
+                space_character=CharacterBox(" ", ch_1.top_right_x, ch_1.bottom_left_y, ch_2.bottom_left_x, ch_2.top_right_y)
                 line.insert(i+1, space_character)
 
                 i+=1
 
             i+=1
 
-    print(len(lines.keys()))
-    for key in lines.keys():
-        line=""
-        for ch in lines[key]:
-            line+=ch.character
-        print(line)
+    result=[i for i in lines.keys()]
+    result.sort(reverse=True)
+    result=[lines[line] for line in result]
 
-ipc=ImageProcessingConfiguration()
-img=ImageProcessor.load_image_from_file("img.png")
-#print(pytesseract.image_to_string(ImageProcessor.process_image(img, ipc), lang="slk"))
-segment_image(img)
+    return result
+
+class MathScanner:
+
+    @property
+    def file_name(self): return self._file_name
+
+    @property
+    def image_boxes(self): return self._image_boxes
+
+    @property
+    def image_text(self): return self._image_text
+
+    def __init__(self, settings):
+
+        self._file_name="Untitled"
+        self._image=None
+        self._image_text=""
+        self._image_boxes=[]
+
+        self._left_border=None
+        self._right_border=None
+        self._top_border=None
+        self._bottom_border=None
+
+        self._settings=settings
+
+    def load_image_from_file(self, path):
+        self._image=ImageProcessor.process_image(ImageProcessor.load_image_from_file(path), self._settings.input_image_processing_configuration)
+        self._file_name=path.split("/")[-1]
+        self._image_boxes=segment_image(self._image)
+        self._image_text="\n".join(["".join([ch.character for ch in l]) for l in self._image_boxes])
+
+        self._left_border, self._right_border, self._top_border, self._bottom_border=None, None, None, None
+
+    def place_left_border(self, row, column):
+
+        self._check_coordinates(row, column)
+
+        border=self._image_boxes[row][column]._bottom_left_x
+
+        if self._left_border==None or border<self._left_border:
+            self._left_border=border
+
+            return True
+
+        return False
+    def place_right_border(self, row, column):
+
+        self._check_coordinates(row, column)
+
+        border=self._image_boxes[row][column]._top_right_x
+
+        if self._right_border==None or border>self._right_border:
+            self._right_border=border
+
+            return True
+
+        return False
+    def place_top_border(self, row, column):
+
+        self._check_coordinates(row, column)
+
+        border=self._image_boxes[row][column]._top_right_y
+
+        if self._top_border==None or border>self._top_border:
+            self._top_border=border
+
+            return True
+
+        return False
+    def place_bottom_border(self, row, column):
+
+        self._check_coordinates(row, column)
+
+        border=self._image_boxes[row][column]._bottom_left_y
+
+        if self._bottom_border==None or border<self._bottom_border:
+            self._bottom_border=border
+
+            return True
+
+        return False
+
+    def remove_left_border(self):
+        if self._left_border!=None:
+            self._left_border=None
+
+            return True
+
+        return False
+    def remove_right_border(self):
+        if self._right_border!=None:
+            self._right_border=None
+
+            return True
+
+        return False
+    def remove_top_border(self):
+        if self._top_border!=None:
+            self._top_border=None
+
+            return True
+
+        return False
+    def remove_bottom_border(self):
+        if self._bottom_border!=None:
+            self._bottom_border=None
+
+            return True
+
+        return False
+
+    def _check_coordinates(self, row, column):
+
+        if row<0 or row>=len(self._image_boxes):
+            raise ValueError(f"Row {row} out of range, {len(self._image_boxes)} available.")
+        if column<0 or column>=len(self._image_boxes[row]):
+            raise ValueError(""f"Column {column} out of range, {len(self._image_boxes[row])} available.")
+
+settings=Settings()
+settings.load("settings.yaml")
+
+math_scanner=MathScanner(settings)
+math_scanner.load_image_from_file("img.png")
+print(math_scanner.image_text)
 
