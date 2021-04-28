@@ -3,9 +3,12 @@
 import os, sys
 from os import path
 
+import appdirs
 from imageio import imread
 from PIL import Image, ImageOps
+from speechd.client import SSIPClient
 import pytesseract
+import wx
 import yaml
 
 class ImageProcessor:
@@ -60,6 +63,32 @@ class ImageProcessingConfiguration:
         self.grayscale=grayscale
     def set_blackwhite_threshold(self, blackwhite_threshold):
         self.blackwhite_threshold=blackwhite_threshold
+class SpeechConfiguration:
+
+    def __init__(self, speech_module="espeak-ng", language="en", voice="male1", punctuation_mode="some", pitch=10, rate=2, volume=100):
+
+        self.speech_module=speech_module
+        self.language=language
+        self.voice=voice
+        self.punctuation_mode=punctuation_mode
+        self.pitch=pitch
+        self.rate=rate
+        self.volume=volume
+
+    def set_speech_module(self, speech_module):
+        self.speech_module=speech_module
+    def set_language(self, language):
+        self.language=language
+    def set_voice(self, voice):
+        self.voice=voice
+    def set_punctuation_mode(self, punctuation_mode):
+        self.punctuation_mode=punctuation_mode
+    def set_pitch(self, pitch):
+        self.pitch=pitch
+    def set_rate(self, rate):
+        self.rate=rate
+    def set_volume(self, volume):
+        self.volume=volume
 class TesseractConfiguration:
 
     def __init__(self, data_directory="", recognition_language="eng", ocr_engine_mode=3):
@@ -78,7 +107,9 @@ class Settings:
 
     def __init__(self):
 
+        self.tesseract_configuration=TesseractConfiguration()
         self.input_image_processing_configuration=ImageProcessingConfiguration()
+        self.speech_configuration=SpeechConfiguration()
 
         self._setting_getter_result=None # A helper variable for retrieving settings from configuration file
 
@@ -89,6 +120,7 @@ class Settings:
 
             if self._get_tesseract_configuration(doc, "tesseract"): self.tesseract_configuration=self._setting_getter_result
             if self._get_image_processing_configuration(doc, "input image processing"): self.input_image_processing_configuration=self._setting_getter_result
+            if self._get_speech_configuration(doc, "speech"): self.speech_configuration=self._setting_getter_result
 
     def _get_image_processing_configuration(self, yaml_node, key_name):
         if key_name in yaml_node:
@@ -103,6 +135,24 @@ class Settings:
                     if self._get_int(ipc_node, "blackwhite threshold"): result.set_blackwhite_threshold(self._setting_getter_result)
                 else:
                     result.set_blackwhite_threshold(-1)
+
+            self._setting_getter_result=result
+
+            return True
+
+        return False
+    def _get_speech_configuration(self, yaml_node, key_name):
+        if key_name in yaml_node:
+            result=SpeechConfiguration()
+            speech_node=yaml_node[key_name]
+
+            if self._get_str(speech_node, "speech module"): result.set_speech_module(self._setting_getter_result)
+            if self._get_str(speech_node, "language"): result.set_language(self._setting_getter_result)
+            if self._get_str(speech_node, "voice"): result.set_voice(self._setting_getter_result)
+            if self._get_str(speech_node, "punctuation mode"): result.set_punctuation_mode(self._setting_getter_result)
+            if self._get_int(speech_node, "pitch"): result.set_pitch(self._setting_getter_result)
+            if self._get_int(speech_node, "rate"): result.set_rate(self._setting_getter_result)
+            if self._get_int(speech_node, "volume"): result.set_volume(self._setting_getter_result)
 
             self._setting_getter_result=result
 
@@ -399,10 +449,200 @@ class MathScanner:
         if column<0 or column>=len(self._image_boxes[row]):
             raise ValueError(""f"Column {column} out of range, {len(self._image_boxes[row])} available.")
 
-settings=Settings()
-settings.load("settings.yaml")
+class LinuxSpeech:
 
-math_scanner=MathScanner(settings)
-math_scanner.load_image_from_file("img.png")
-print(math_scanner.image_text)
+    def __init__(self, configuration=None):
+        self._connection=SSIPClient("math_scanner")
+
+        self.configure(configuration)
+
+    def configure(self, configuration):
+
+        if self._connection!=None and configuration!=None:
+            self._connection.set_output_module(configuration.speech_module)
+            self._connection.set_language(configuration.language)
+            self._connection.set_voice(configuration.voice)
+            self._connection.set_punctuation(configuration.punctuation_mode)
+            self._connection.set_pitch(configuration.pitch)
+            self._connection.set_rate(configuration.rate)
+            self._connection.set_volume(configuration.volume)
+
+    def speak(self, text):
+        self._connection.speak(text)
+
+    def release(self):
+        self._connection.close()
+        self._connection=None
+
+class MainWindow(wx.Frame):
+
+    OPEN_MENU_ITEM_ID=1
+
+    PLACE_LEFT_BORDER_MENU_ITEM_ID=31
+    PLACE_RIGHT_BORDER_MENU_ITEM_ID=32
+    PLACE_TOP_BORDER_MENU_ITEM_ID=33
+    PLACE_BOTTOM_BORDER_MENU_ITEM_ID=34
+
+    REMOVE_LEFT_BORDER_MENU_ITEM_ID=35
+    REMOVE_RIGHT_BORDER_MENU_ITEM_ID=36
+    REMOVE_TOP_BORDER_MENU_ITEM_ID=37
+    REMOVE_BOTTOM_BORDER_MENU_ITEM_ID=38
+
+    def __init__(self):
+        super().__init__(parent=None)
+
+        self._settings=Settings()
+        self._settings.load(path.join(appdirs.user_config_dir("math_scanner"), "settings.yaml"))
+
+        self._speech=LinuxSpeech(self._settings.speech_configuration)
+
+        self._math_scanner=MathScanner(self._settings)
+
+        self._setup_interface()
+
+        self._set_window_title()
+    def _setup_interface(self):
+
+        self._image_text_TextCtrl=wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP)
+
+        menu_bar=wx.MenuBar()
+        menu_bar.Append(self._construct_file_menu(), "&File")
+        menu_bar.Append(self._construct_borders_menu(), "&Borders")
+        menu_bar.Append(self._construct_help_menu(), "&Help")
+
+        self.SetMenuBar(menu_bar)
+
+        self.Bind(wx.EVT_CLOSE, self._main_window_close)
+    def _construct_file_menu(self):
+
+        file_menu=wx.Menu()
+
+        file_menu.Append(MainWindow.OPEN_MENU_ITEM_ID, "Open\tCtrl+O")
+        file_menu.Append(wx.ID_EXIT, "Exit")
+
+        self.Bind(wx.EVT_MENU, self._open_menu_item_click, id=MainWindow.OPEN_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._exit_menu_item_click, id=wx.ID_EXIT)
+
+        return file_menu
+    def _construct_borders_menu(self):
+
+        borders_menu=wx.Menu()
+
+        borders_menu.Append(MainWindow.PLACE_LEFT_BORDER_MENU_ITEM_ID, "Place left border\tCtrl+L")
+        borders_menu.Append(MainWindow.PLACE_RIGHT_BORDER_MENU_ITEM_ID, "Place right border\tCtrl+R")
+        borders_menu.Append(MainWindow.PLACE_TOP_BORDER_MENU_ITEM_ID, "Place top border\tCtrl+T")
+        borders_menu.Append(MainWindow.PLACE_BOTTOM_BORDER_MENU_ITEM_ID, "Place bottom border\tCtrl+B")
+
+        borders_menu.Append(MainWindow.REMOVE_LEFT_BORDER_MENU_ITEM_ID, "Remove left border\tCtrl+Shift+L")
+        borders_menu.Append(MainWindow.REMOVE_RIGHT_BORDER_MENU_ITEM_ID, "Remove right border\tCtrl+Shift+R")
+        borders_menu.Append(MainWindow.REMOVE_TOP_BORDER_MENU_ITEM_ID, "Remove top border\tCtrl+Shift+T")
+        borders_menu.Append(MainWindow.REMOVE_BOTTOM_BORDER_MENU_ITEM_ID, "Remove bottom border\tCtrl+Shift+B")
+
+        # Events
+
+        self.Bind(wx.EVT_MENU, self._place_left_border_menu_item_click, id=MainWindow.PLACE_LEFT_BORDER_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._place_right_border_menu_item_click, id=MainWindow.PLACE_RIGHT_BORDER_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._place_top_border_menu_item_click, id=MainWindow.PLACE_TOP_BORDER_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._place_bottom_border_menu_item_click, id=MainWindow.PLACE_BOTTOM_BORDER_MENU_ITEM_ID)
+
+        self.Bind(wx.EVT_MENU, self._remove_left_border_menu_item_click, id=MainWindow.REMOVE_LEFT_BORDER_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._remove_right_border_menu_item_click, id=MainWindow.REMOVE_RIGHT_BORDER_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._remove_top_border_menu_item_click, id=MainWindow.REMOVE_TOP_BORDER_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._remove_bottom_border_menu_item_click, id=MainWindow.REMOVE_BOTTOM_BORDER_MENU_ITEM_ID)
+
+        return borders_menu
+    def _construct_help_menu(self):
+
+        help_menu=wx.Menu()
+
+        help_menu.Append(wx.ID_ABOUT, "About")
+
+        return help_menu
+    def _set_window_title(self):
+        self.SetTitle(f"{self._math_scanner.file_name} - Math scanner")
+
+    # Event methods
+
+    def _open_menu_item_click(self, event):
+
+        with wx.FileDialog(self, "Open an image", style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST) as file_dialog:
+
+            if file_dialog.ShowModal()==wx.ID_CANCEL:
+                return
+
+            path=file_dialog.GetPath()
+
+            self._open_image(path)
+    def _exit_menu_item_click(self, event):
+        self.Close()
+
+    def _place_left_border_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+
+        try:
+            if self._math_scanner.place_left_border(row, column):
+                self._speech.speak("Set")
+        except ValueError:
+            self._speech.speak("Invalid coordinates")
+    def _place_right_border_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+
+        try:
+            if self._math_scanner.place_right_border(row, column):
+                self._speech.speak("Set")
+        except ValueError:
+            self._speech.speak("Invalid coordinates")
+    def _place_top_border_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+
+        try:
+            if self._math_scanner.place_top_border(row, column):
+                self._speech.speak("Set")
+        except ValueError:
+            self._speech.speak("Invalid coordinates")
+    def _place_bottom_border_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+
+        try:
+            if self._math_scanner.place_bottom_border(row, column):
+                self._speech.speak("Set")
+        except ValueError:
+            self._speech.speak("Invalid coordinates")
+
+    def _remove_left_border_menu_item_click(self, event):
+
+        if self._math_scanner.remove_left_border():
+            self._speech.speak("Removed")
+    def _remove_right_border_menu_item_click(self, event):
+
+        if self._math_scanner.remove_right_border():
+            self._speech.speak("Removed")
+    def _remove_top_border_menu_item_click(self, event):
+
+        if self._math_scanner.remove_top_border():
+            self._speech.speak("Removed")
+    def _remove_bottom_border_menu_item_click(self, event):
+
+        if self._math_scanner.remove_bottom_border():
+            self._speech.speak("Removed")
+
+    def _main_window_close(self, event):
+        self._speech.release()
+
+        event.Skip()
+
+    # Helper methods
+
+    def _open_image(self, path):
+        try:
+            self._math_scanner.load_image_from_file(path)
+            self._image_text_TextCtrl.SetValue(self._math_scanner.image_text)
+            self._set_window_title()
+        except:
+            print("Error")
+
+app=wx.App(False)
+main_window=MainWindow()
+main_window.Show(True)
+app.MainLoop()
 

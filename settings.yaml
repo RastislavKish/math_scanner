@@ -10,3 +10,12 @@ input image processing:
     blackwhite: no
     blackwhite threshold: 200
 
+speech:
+    speech module: espeak-ng
+    language: en
+    voice: male1
+    punctuation mode: some
+    pitch: 10
+    rate: 2
+    volume: 100
+
