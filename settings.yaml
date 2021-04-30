@@ -1,3 +1,7 @@
+mathpix:
+    app id: your_app_id
+    app key: your_app_key
+
 tesseract:
     data directory: default
     recognition language: eng

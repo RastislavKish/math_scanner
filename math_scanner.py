@@ -1,10 +1,12 @@
 #!/usr/bin/python3
 
-import os, sys
+from base64 import b64encode
+from io import BytesIO
+import json
 from os import path
+import requests
 
 import appdirs
-from imageio import imread
 from PIL import Image, ImageOps
 from speechd.client import SSIPClient
 import pytesseract
@@ -13,8 +15,6 @@ import yaml
 
 class ImageProcessor:
 
-    def load_image_from_file(path):
-        return Image.fromarray(imread(path, pilmode="RGB"))
     def process_image(image, config):
 
         if config.scale_factor!=1:
@@ -63,6 +63,23 @@ class ImageProcessingConfiguration:
         self.grayscale=grayscale
     def set_blackwhite_threshold(self, blackwhite_threshold):
         self.blackwhite_threshold=blackwhite_threshold
+class MathpixConfiguration:
+
+    def __init__(self, app_id=None, app_key=None):
+
+        self.app_id=app_id
+        self.app_key=app_key
+
+    def set_app_id(self, app_id):
+        if app_id=="your_app_id":
+            self.app_id=None
+        else:
+            self.app_id=app_id
+    def set_app_key(self, app_key):
+        if app_key=="your_app_id":
+            self.app_key=None
+        else:
+            self.app_key=app_key
 class SpeechConfiguration:
 
     def __init__(self, speech_module="espeak-ng", language="en", voice="male1", punctuation_mode="some", pitch=10, rate=2, volume=100):
@@ -107,6 +124,7 @@ class Settings:
 
     def __init__(self):
 
+        self.mathpix_configuration=MathpixConfiguration()
         self.tesseract_configuration=TesseractConfiguration()
         self.input_image_processing_configuration=ImageProcessingConfiguration()
         self.speech_configuration=SpeechConfiguration()
@@ -118,6 +136,7 @@ class Settings:
         if path.isfile(file_path):
             doc=yaml.safe_load(open(file_path, "r", encoding="utf-8"))
 
+            if self._get_mathpix_configuration(doc, "mathpix"): self.mathpix_configuration=self._setting_getter_result
             if self._get_tesseract_configuration(doc, "tesseract"): self.tesseract_configuration=self._setting_getter_result
             if self._get_image_processing_configuration(doc, "input image processing"): self.input_image_processing_configuration=self._setting_getter_result
             if self._get_speech_configuration(doc, "speech"): self.speech_configuration=self._setting_getter_result
@@ -135,6 +154,19 @@ class Settings:
                     if self._get_int(ipc_node, "blackwhite threshold"): result.set_blackwhite_threshold(self._setting_getter_result)
                 else:
                     result.set_blackwhite_threshold(-1)
+
+            self._setting_getter_result=result
+
+            return True
+
+        return False
+    def _get_mathpix_configuration(self, yaml_node, key_name):
+        if key_name in yaml_node:
+            result=MathpixConfiguration()
+            mathpix_node=yaml_node[key_name]
+
+            if self._get_str(mathpix_node, "app id"): result.set_app_id(self._setting_getter_result)
+            if self._get_str(mathpix_node, "app key"): result.set_app_key(self._setting_getter_result)
 
             self._setting_getter_result=result
 
@@ -331,6 +363,50 @@ def segment_image(image):
 
     return result
 
+class MathpixRecognizer:
+
+    def __init__(self, configuration=None):
+
+        self._configuration=MathpixConfiguration()
+
+        self.configure(configuration)
+
+    def configure(self, configuration):
+        if configuration!=None:
+            self._configuration=configuration
+
+    def recognize(self, image):
+
+        assert self._configuration.app_id!=None
+        assert self._configuration.app_key!=None
+
+        png_stream=BytesIO()
+        image.save(png_stream, format="png")
+        png_stream.seek(0)
+
+        png_b64=b64encode(png_stream.read()).decode("utf-8")
+
+        png_stream.close()
+
+        # We have the image in a base64 encoding, now it's time to call the server
+
+        service="https://api.mathpix.com/v3/latex"
+
+        headers={
+            "app_id": self._configuration.app_id,
+            "app_key": self._configuration.app_key,
+            "Content-type": "application/json"
+            }
+
+        args=json.dumps({
+            "src": f"data:image/png;base64,{png_b64}",
+            "formats": ["asciimath"],
+            })
+
+        result=requests.post(service, headers=headers, data=args, timeout=30)
+
+        return result.text
+
 class MathScanner:
 
     @property
@@ -355,9 +431,10 @@ class MathScanner:
         self._bottom_border=None
 
         self._settings=settings
+        self._mathpix_recognizer=MathpixRecognizer(settings.mathpix_configuration)
 
     def load_image_from_file(self, path):
-        self._image=ImageProcessor.process_image(ImageProcessor.load_image_from_file(path), self._settings.input_image_processing_configuration)
+        self._image=ImageProcessor.process_image(Image.open(path), self._settings.input_image_processing_configuration)
         self._file_name=path.split("/")[-1]
         self._image_boxes=segment_image(self._image)
         self._image_text="\n".join(["".join([ch.character for ch in l]) for l in self._image_boxes])
@@ -442,6 +519,36 @@ class MathScanner:
 
         return False
 
+    def get_bordered_region(self):
+        assert self._image!=None
+
+        if self._left_border==None or self._right_border==None:
+            left_border=self._left_border if self._left_border!=None else 0
+            right_border=self._right_border if self._right_border!=None else self._image.size[0]-1
+        else:
+            left_border, right_border=(self._left_border, self._right_border) if self._left_border<self._right_border else (self._right_border, self._left_border)
+
+        if self._top_border==None or self._bottom_border==None:
+            top_border=self._top_border if self._top_border!=None else self._image.size[1]-1
+            bottom_border=self._bottom_border if self._bottom_border!=None else 0
+        else:
+            top_border, bottom_border=(self._top_border, self._bottom_border) if self._top_border>self._bottom_border else (self._bottom_border, self._top_border)
+
+        if left_border<0: left_border=0
+        if right_border>=self._image.size[0]: right_border=self._image.size[0]-1
+        if bottom_border<0: bottom_border=0
+        if top_border>=self._image.size[1]: top_border=self._image.size[1]-1
+
+        # Tesseract and PIL use different coordinates system. While Tesseract has its 0;0 point in bottom left corner, PIL uses the top left one. It's therefore needed to convert our values
+
+        top_border=self._image.size[1]-1-top_border
+        bottom_border=self._image.size[1]-1-bottom_border
+
+        return self._image.crop((left_border, top_border, right_border+1, bottom_border+1))
+
+    def recognize(self, image):
+        return self._mathpix_recognizer.recognize(image)
+
     def _check_coordinates(self, row, column):
 
         if row<0 or row>=len(self._image_boxes):
@@ -488,6 +595,9 @@ class MainWindow(wx.Frame):
     REMOVE_TOP_BORDER_MENU_ITEM_ID=37
     REMOVE_BOTTOM_BORDER_MENU_ITEM_ID=38
 
+    RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID=71
+    RECOGNIZE_FULL_IMAGE_MENU_ITEM_ID=72
+
     def __init__(self):
         super().__init__(parent=None)
 
@@ -508,6 +618,7 @@ class MainWindow(wx.Frame):
         menu_bar=wx.MenuBar()
         menu_bar.Append(self._construct_file_menu(), "&File")
         menu_bar.Append(self._construct_borders_menu(), "&Borders")
+        menu_bar.Append(self._construct_recognition_menu(), "&Recognition")
         menu_bar.Append(self._construct_help_menu(), "&Help")
 
         self.SetMenuBar(menu_bar)
@@ -551,6 +662,19 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self._remove_bottom_border_menu_item_click, id=MainWindow.REMOVE_BOTTOM_BORDER_MENU_ITEM_ID)
 
         return borders_menu
+    def _construct_recognition_menu(self):
+
+        recognition_menu=wx.Menu()
+
+        recognition_menu.Append(MainWindow.RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID, "Recognize bordered region")
+        recognition_menu.Append(MainWindow.RECOGNIZE_FULL_IMAGE_MENU_ITEM_ID, "Recognize full image")
+
+        # Events
+
+        self.Bind(wx.EVT_MENU, self._recognize_bordered_region_menu_item_click, id=MainWindow.RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._recognize_full_image_menu_item_click, id=MainWindow.RECOGNIZE_FULL_IMAGE_MENU_ITEM_ID)
+
+        return recognition_menu
     def _construct_help_menu(self):
 
         help_menu=wx.Menu()
@@ -625,6 +749,13 @@ class MainWindow(wx.Frame):
 
         if self._math_scanner.remove_bottom_border():
             self._speech.speak("Removed")
+
+    def _recognize_bordered_region_menu_item_click(self, event):
+        img=self._math_scanner.get_bordered_region()
+
+        wx.MessageBox(str(self._math_scanner.recognize(img)))
+    def _recognize_full_image_menu_item_click(self, event):
+        print("click2")
 
     def _main_window_close(self, event):
         self._speech.release()
