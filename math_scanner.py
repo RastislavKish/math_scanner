@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 from os import path
 import requests
+import sys
 
 import appdirs
 from PIL import Image, ImageOps
@@ -16,6 +17,8 @@ import yaml
 class ImageProcessor:
 
     def process_image(image, config):
+        if not config.active:
+            return image
 
         if config.scale_factor!=1:
             image=ImageProcessor._scale(image, config.scale_factor)
@@ -48,13 +51,16 @@ class ImageProcessor:
         return ImageOps.grayscale(image).point(lambda p: 0 if p<threshold else 255)
 class ImageProcessingConfiguration:
 
-    def __init__(self, scale_factor=1, invert=False, grayscale=False, blackwhite_threshold=-1):
+    def __init__(self, active=True, scale_factor=1, invert=False, grayscale=False, blackwhite_threshold=-1):
 
+        self.active=active
         self.scale_factor=scale_factor
         self.invert=invert
         self.grayscale=grayscale
         self.blackwhite_threshold=blackwhite_threshold
 
+    def set_active(self, active):
+        self.active=active
     def set_scale_factor(self, scale_factor):
         self.scale_factor=scale_factor
     def set_invert(self, invert):
@@ -65,10 +71,14 @@ class ImageProcessingConfiguration:
         self.blackwhite_threshold=blackwhite_threshold
 class MathpixConfiguration:
 
-    def __init__(self, app_id=None, app_key=None):
+    def __init__(self, app_id=None, app_key=None, formats=["asciimath"]):
 
         self.app_id=app_id
         self.app_key=app_key
+        self.formats=["asciimath"]
+
+        # The formats configuration must be done separately, as otherwise the user could specify invalid input and the property stay undefined
+        self.set_formats(formats)
 
     def set_app_id(self, app_id):
         if app_id=="your_app_id":
@@ -80,6 +90,20 @@ class MathpixConfiguration:
             self.app_key=None
         else:
             self.app_key=app_key
+    def set_formats(self, formats):
+
+        i=0
+        while i<len(formats):
+
+            formats[i]=formats[i].lower().replace(" ", "_")
+
+            if formats[i]!="asciimath" and formats[i]!="latex_simplified":
+                del formats[i]
+                continue
+            i+=1
+
+        if len(formats)>0:
+            self.formats=formats
 class SpeechConfiguration:
 
     def __init__(self, speech_module="espeak-ng", language="en", voice="male1", punctuation_mode="some", pitch=10, rate=2, volume=100):
@@ -108,17 +132,27 @@ class SpeechConfiguration:
         self.volume=volume
 class TesseractConfiguration:
 
-    def __init__(self, data_directory="", recognition_language="eng", ocr_engine_mode=3):
+    def __init__(self, data_directory=None, recognition_language="eng", ocr_engine_mode=3):
         self.data_directory=data_directory
         self.recognition_language=recognition_language
         self.ocr_engine_mode=ocr_engine_mode
 
     def set_data_directory(self, data_directory):
-        self.data_directory=data_directory if data_directory!="default" else ""
+        self.data_directory=data_directory if data_directory!="default" else None
     def set_recognition_language(self, recognition_language):
         self.recognition_language=recognition_language
     def set_ocr_engine_mode(self, ocr_engine_mode):
         self.ocr_engine_mode=ocr_engine_mode
+
+    def generate_shell_configuration(self):
+        result=[]
+
+        if self.data_directory!=None:
+            result.append(f"--tessdata-dir {self.data_directory}")
+
+        result.append(f"--oem {self.ocr_engine_mode}")
+
+        return " ".join(result)
 
 class Settings:
 
@@ -126,7 +160,8 @@ class Settings:
 
         self.mathpix_configuration=MathpixConfiguration()
         self.tesseract_configuration=TesseractConfiguration()
-        self.input_image_processing_configuration=ImageProcessingConfiguration()
+        self.input_image_processing_configuration=ImageProcessingConfiguration(active=False)
+        self.output_image_processing_configuration=ImageProcessingConfiguration(active=False)
         self.speech_configuration=SpeechConfiguration()
 
         self._setting_getter_result=None # A helper variable for retrieving settings from configuration file
@@ -139,6 +174,7 @@ class Settings:
             if self._get_mathpix_configuration(doc, "mathpix"): self.mathpix_configuration=self._setting_getter_result
             if self._get_tesseract_configuration(doc, "tesseract"): self.tesseract_configuration=self._setting_getter_result
             if self._get_image_processing_configuration(doc, "input image processing"): self.input_image_processing_configuration=self._setting_getter_result
+            if self._get_image_processing_configuration(doc, "output image processing"): self.output_image_processing_configuration=self._setting_getter_result
             if self._get_speech_configuration(doc, "speech"): self.speech_configuration=self._setting_getter_result
 
     def _get_image_processing_configuration(self, yaml_node, key_name):
@@ -146,6 +182,7 @@ class Settings:
             result=ImageProcessingConfiguration()
             ipc_node=yaml_node[key_name]
 
+            if self._get_bool(ipc_node, "active"): result.set_active(self._setting_getter_result)
             if self._get_int(ipc_node, "scale factor"): result.set_scale_factor(self._setting_getter_result)
             if self._get_bool(ipc_node, "invert"): result.set_invert(self._setting_getter_result)
             if self._get_bool(ipc_node, "grayscale"): result.set_grayscale(self._setting_getter_result)
@@ -167,6 +204,7 @@ class Settings:
 
             if self._get_str(mathpix_node, "app id"): result.set_app_id(self._setting_getter_result)
             if self._get_str(mathpix_node, "app key"): result.set_app_key(self._setting_getter_result)
+            if self._get_list(mathpix_node, "formats"): result.set_formats(self._setting_getter_result)
 
             self._setting_getter_result=result
 
@@ -213,6 +251,12 @@ class Settings:
         return False
     def _get_int(self, yaml_node, key_name):
         if key_name in yaml_node and isinstance(yaml_node[key_name], int):
+            self._setting_getter_result=yaml_node[key_name]
+            return True
+
+        return False
+    def _get_list(self, yaml_node, key_name):
+        if key_name in yaml_node and isinstance(yaml_node[key_name], list):
             self._setting_getter_result=yaml_node[key_name]
             return True
 
@@ -265,11 +309,11 @@ class CharacterBox:
     def is_on_line(self, line_y):
         return line_y>=self._bottom_left_y and line_y<=self._top_right_y
 
-def segment_image(image):
+def segment_image(image, tesseract_configuration):
 
     # First, recognize the input image and parse the bounding boxes of individual characters. We currently don't need the page number entry, so will take just the first 5 entries of each row of image_to_boxes.
 
-    boxes=pytesseract.image_to_boxes(image, lang="slk")
+    boxes=pytesseract.image_to_boxes(image, lang=tesseract_configuration.recognition_language, config=tesseract_configuration.generate_shell_configuration())
     characters=[CharacterBox.from_list(i.split(" ")[:5]) for i in boxes.split("\n") if len(i.split(" "))==6]
     if len(characters)==0:
         return []
@@ -395,12 +439,12 @@ class MathpixRecognizer:
         headers={
             "app_id": self._configuration.app_id,
             "app_key": self._configuration.app_key,
-            "Content-type": "application/json"
+            "Content-type": "application/json",
             }
 
         args=json.dumps({
             "src": f"data:image/png;base64,{png_b64}",
-            "formats": ["asciimath"],
+            "formats": self._configuration.formats,
             })
 
         result=requests.post(service, headers=headers, data=args, timeout=30)
@@ -436,7 +480,7 @@ class MathScanner:
     def load_image_from_file(self, path):
         self._image=ImageProcessor.process_image(Image.open(path), self._settings.input_image_processing_configuration)
         self._file_name=path.split("/")[-1]
-        self._image_boxes=segment_image(self._image)
+        self._image_boxes=segment_image(self._image, self._settings.tesseract_configuration)
         self._image_text="\n".join(["".join([ch.character for ch in l]) for l in self._image_boxes])
 
         self._left_border, self._right_border, self._top_border, self._bottom_border=None, None, None, None
@@ -519,6 +563,19 @@ class MathScanner:
 
         return False
 
+    def remove_all_borders(self):
+        if self._left_border!=None or self._right_border!=None or self._top_border!=None or self._bottom_border!=None:
+            self._left_border, self._right_border, self._top_border, self._bottom_border=None, None, None, None
+
+            return True
+
+        return False
+
+    def switch_horizontal_borders(self):
+        self._left_border, self._right_border=self._right_border, self._left_border
+    def switch_vertical_borders(self):
+        self._top_border, self._bottom_border=self._bottom_border, self._top_border
+
     def get_bordered_region(self):
         assert self._image!=None
 
@@ -547,7 +604,7 @@ class MathScanner:
         return self._image.crop((left_border, top_border, right_border+1, bottom_border+1))
 
     def recognize(self, image):
-        return self._mathpix_recognizer.recognize(image)
+        return self._mathpix_recognizer.recognize(ImageProcessor.process_image(image, self._settings.output_image_processing_configuration))
 
     def _check_coordinates(self, row, column):
 
@@ -595,6 +652,11 @@ class MainWindow(wx.Frame):
     REMOVE_TOP_BORDER_MENU_ITEM_ID=37
     REMOVE_BOTTOM_BORDER_MENU_ITEM_ID=38
 
+    REMOVE_ALL_BORDERS_MENU_ITEM_ID=39
+
+    SWITCH_HORIZONTAL_BORDERS_MENU_ITEM_ID=40
+    SWITCH_VERTICAL_BORDERS_MENU_ITEM_ID=41
+
     RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID=71
     RECOGNIZE_FULL_IMAGE_MENU_ITEM_ID=72
 
@@ -602,7 +664,7 @@ class MainWindow(wx.Frame):
         super().__init__(parent=None)
 
         self._settings=Settings()
-        self._settings.load(path.join(appdirs.user_config_dir("math_scanner"), "settings.yaml"))
+        self._load_settings()
 
         self._speech=LinuxSpeech(self._settings.speech_configuration)
 
@@ -611,6 +673,10 @@ class MainWindow(wx.Frame):
         self._setup_interface()
 
         self._set_window_title()
+
+        args=sys.argv
+        if len(args)==2:
+            self._open_image(args[1])
     def _setup_interface(self):
 
         self._image_text_TextCtrl=wx.TextCtrl(self, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_DONTWRAP)
@@ -649,6 +715,11 @@ class MainWindow(wx.Frame):
         borders_menu.Append(MainWindow.REMOVE_TOP_BORDER_MENU_ITEM_ID, "Remove top border\tCtrl+Shift+T")
         borders_menu.Append(MainWindow.REMOVE_BOTTOM_BORDER_MENU_ITEM_ID, "Remove bottom border\tCtrl+Shift+B")
 
+        borders_menu.Append(MainWindow.REMOVE_ALL_BORDERS_MENU_ITEM_ID, "Remove all borders\tCtrl+Alt+R")
+
+        borders_menu.Append(MainWindow.SWITCH_HORIZONTAL_BORDERS_MENU_ITEM_ID, "Switch horizontal borders")
+        borders_menu.Append(MainWindow.SWITCH_VERTICAL_BORDERS_MENU_ITEM_ID, "Switch vertical borders")
+
         # Events
 
         self.Bind(wx.EVT_MENU, self._place_left_border_menu_item_click, id=MainWindow.PLACE_LEFT_BORDER_MENU_ITEM_ID)
@@ -660,6 +731,11 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self._remove_right_border_menu_item_click, id=MainWindow.REMOVE_RIGHT_BORDER_MENU_ITEM_ID)
         self.Bind(wx.EVT_MENU, self._remove_top_border_menu_item_click, id=MainWindow.REMOVE_TOP_BORDER_MENU_ITEM_ID)
         self.Bind(wx.EVT_MENU, self._remove_bottom_border_menu_item_click, id=MainWindow.REMOVE_BOTTOM_BORDER_MENU_ITEM_ID)
+
+        self.Bind(wx.EVT_MENU, self._remove_all_borders_menu_item_click, id=MainWindow.REMOVE_ALL_BORDERS_MENU_ITEM_ID)
+
+        self.Bind(wx.EVT_MENU, self._switch_horizontal_borders_menu_item_click, id=MainWindow.SWITCH_HORIZONTAL_BORDERS_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._switch_vertical_borders_menu_item_click, id=MainWindow.SWITCH_VERTICAL_BORDERS_MENU_ITEM_ID)
 
         return borders_menu
     def _construct_recognition_menu(self):
@@ -750,10 +826,51 @@ class MainWindow(wx.Frame):
         if self._math_scanner.remove_bottom_border():
             self._speech.speak("Removed")
 
+    def _remove_all_borders_menu_item_click(self, event):
+        if self._math_scanner.remove_all_borders():
+            self._speech.speak("Removed all")
+
+    def _switch_horizontal_borders_menu_item_click(self, event):
+        self._math_scanner.switch_horizontal_borders()
+
+        self._speech.speak("Switched")
+    def _switch_vertical_borders_menu_item_click(self, event):
+        self._math_scanner.switch_vertical_borders()
+
+        self._speech.speak("Switched")
+
     def _recognize_bordered_region_menu_item_click(self, event):
         img=self._math_scanner.get_bordered_region()
 
-        wx.MessageBox(str(self._math_scanner.recognize(img)))
+        json_response=self._math_scanner.recognize(img)
+
+        response=json.loads(json_response)
+
+        message=""
+
+        if "error" in response:
+            title="Error"
+
+            message="\n".join([
+                f"Error: {response['error']}",
+                f"Error id: {response['error_info']['id']}",
+                f"Error message: {response['error_info']['message']}",
+                ])
+        else:
+            title="Result"
+
+            if "latex_confidence" in response:
+                message+=f"LaTeX confidence: {response['latex_confidence']}\n"
+            if "asciimath" in response:
+                message+=f"Asciimath: {response['asciimath']}\n"
+            if "latex_simplified" in response:
+                message+=f"LaTeX simplified: {response['latex_simplified']}\n"
+
+        dialog=wx.MessageDialog(parent=None, message=message, caption=title, style=wx.OK | wx.CANCEL | wx.CENTRE | wx.ICON_INFORMATION)
+        dialog.SetOKCancelLabels("Ok", "Show full json response")
+
+        if dialog.ShowModal()==wx.ID_CANCEL:
+            wx.MessageBox(json_response, "Json response")
     def _recognize_full_image_menu_item_click(self, event):
         print("click2")
 
@@ -769,8 +886,18 @@ class MainWindow(wx.Frame):
             self._math_scanner.load_image_from_file(path)
             self._image_text_TextCtrl.SetValue(self._math_scanner.image_text)
             self._set_window_title()
-        except:
-            print("Error")
+        except FileNotFoundError:
+            wx.MessageBox(f"File {path} can't be found.", caption="Error", style=wx.CENTRE | wx.ICON_ERROR)
+    def _load_settings(self):
+        candidates=[
+            path.join(appdirs.user_config_dir("math_scanner"), "settings.yaml"),
+            "settings.yaml",
+            ]
+
+        for p in candidates:
+            if path.exists(p):
+                self._settings.load(p)
+                break
 
 app=wx.App(False)
 main_window=MainWindow()

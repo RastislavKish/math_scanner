@@ -1,6 +1,7 @@
 mathpix:
     app id: your_app_id
     app key: your_app_key
+    formats: [asciimath, latex simplified]
 
 tesseract:
     data directory: default
@@ -8,6 +9,15 @@ tesseract:
     ocr engine mode: 3
 
 input image processing:
+    active: no
+    scale factor: 1
+    invert: no
+    grayscale: no
+    blackwhite: no
+    blackwhite threshold: 200
+
+output image processing:
+    active: no
     scale factor: 1
     invert: no
     grayscale: no
