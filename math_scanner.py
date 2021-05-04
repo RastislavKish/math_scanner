@@ -457,10 +457,26 @@ class MathScanner:
     def file_name(self): return self._file_name
 
     @property
-    def image_boxes(self): return self._image_boxes
+    def image(self):
+        return self._image if not self.has_columns else self._columns[self._active_column_index][0]
 
     @property
-    def image_text(self): return self._image_text
+    def image_boxes(self):
+        return self._image_boxes if not self.has_columns else self._columns[self._active_column_index][1]
+
+    @property
+    def image_text(self):
+        return self._image_text if not self.has_columns else self._columns[self._active_column_index][2]
+
+    @property
+    def active_column_index(self): return self._active_column_index
+
+    @property
+    def column_count(self): return len(self._columns)
+
+    @property
+    def has_columns(self):
+        return len(self._columns)>0
 
     def __init__(self, settings):
 
@@ -474,6 +490,9 @@ class MathScanner:
         self._top_border=None
         self._bottom_border=None
 
+        self._columns=[]
+        self._active_column_index=0
+
         self._settings=settings
         self._mathpix_recognizer=MathpixRecognizer(settings.mathpix_configuration)
 
@@ -484,12 +503,14 @@ class MathScanner:
         self._image_text="\n".join(["".join([ch.character for ch in l]) for l in self._image_boxes])
 
         self._left_border, self._right_border, self._top_border, self._bottom_border=None, None, None, None
+        self._columns=[]
+        self._active_column_index=0
 
     def place_left_border(self, row, column):
 
         self._check_coordinates(row, column)
 
-        border=self._image_boxes[row][column]._bottom_left_x
+        border=self.image_boxes[row][column]._bottom_left_x
 
         if self._left_border==None or border<self._left_border:
             self._left_border=border
@@ -501,7 +522,7 @@ class MathScanner:
 
         self._check_coordinates(row, column)
 
-        border=self._image_boxes[row][column]._top_right_x
+        border=self.image_boxes[row][column]._top_right_x
 
         if self._right_border==None or border>self._right_border:
             self._right_border=border
@@ -513,7 +534,7 @@ class MathScanner:
 
         self._check_coordinates(row, column)
 
-        border=self._image_boxes[row][column]._top_right_y
+        border=self.image_boxes[row][column]._top_right_y
 
         if self._top_border==None or border>self._top_border:
             self._top_border=border
@@ -525,7 +546,7 @@ class MathScanner:
 
         self._check_coordinates(row, column)
 
-        border=self._image_boxes[row][column]._bottom_left_y
+        border=self.image_boxes[row][column]._bottom_left_y
 
         if self._bottom_border==None or border<self._bottom_border:
             self._bottom_border=border
@@ -577,41 +598,90 @@ class MathScanner:
         self._top_border, self._bottom_border=self._bottom_border, self._top_border
 
     def get_bordered_region(self):
-        assert self._image!=None
+        assert self.image!=None
 
         if self._left_border==None or self._right_border==None:
             left_border=self._left_border if self._left_border!=None else 0
-            right_border=self._right_border if self._right_border!=None else self._image.size[0]-1
+            right_border=self._right_border if self._right_border!=None else self.image.size[0]-1
         else:
             left_border, right_border=(self._left_border, self._right_border) if self._left_border<self._right_border else (self._right_border, self._left_border)
 
         if self._top_border==None or self._bottom_border==None:
-            top_border=self._top_border if self._top_border!=None else self._image.size[1]-1
+            top_border=self._top_border if self._top_border!=None else self.image.size[1]-1
             bottom_border=self._bottom_border if self._bottom_border!=None else 0
         else:
             top_border, bottom_border=(self._top_border, self._bottom_border) if self._top_border>self._bottom_border else (self._bottom_border, self._top_border)
 
         if left_border<0: left_border=0
-        if right_border>=self._image.size[0]: right_border=self._image.size[0]-1
+        if right_border>=self.image.size[0]: right_border=self.image.size[0]-1
         if bottom_border<0: bottom_border=0
-        if top_border>=self._image.size[1]: top_border=self._image.size[1]-1
+        if top_border>=self.image.size[1]: top_border=self.image.size[1]-1
 
         # Tesseract and PIL use different coordinates system. While Tesseract has its 0;0 point in bottom left corner, PIL uses the top left one. It's therefore needed to convert our values
 
-        top_border=self._image.size[1]-1-top_border
-        bottom_border=self._image.size[1]-1-bottom_border
+        top_border=self.image.size[1]-1-top_border
+        bottom_border=self.image.size[1]-1-bottom_border
 
-        return self._image.crop((left_border, top_border, right_border+1, bottom_border+1))
+        return self.image.crop((left_border, top_border, right_border+1, bottom_border+1))
 
     def recognize(self, image):
         return self._mathpix_recognizer.recognize(ImageProcessor.process_image(image, self._settings.output_image_processing_configuration))
 
+    def split_to_columns(self):
+        assert self._image!=None
+
+        left_border=self._left_border if self._left_border!=None else 0
+        right_border=self._right_border if self._right_border!=None else self.image.size[0]-1
+
+        if left_border>right_border:
+            left_border, right_border=right_border, left_border
+
+        middle_line=left_border+int((right_border-left_border)/2) # Is the index of column of pixels to the left of the middle line. When cropping the left region, we must increase it by 1 to include it in the cropped image.
+
+        left_column=self.image.crop((0, 0, middle_line+1, self.image.size[1]))
+        right_column=self.image.crop((middle_line+1, 0, self._image.size[0], self.image.size[1]))
+
+        left_column_boxes=segment_image(left_column, self._settings.tesseract_configuration)
+        right_column_boxes=segment_image(right_column, self._settings.tesseract_configuration)
+
+        left_column_text="\n".join(["".join([ch.character for ch in l]) for l in left_column_boxes])
+        right_column_text="\n".join(["".join([ch.character for ch in l]) for l in right_column_boxes])
+
+        if len(self._columns)>0:
+            del self._columns[self._active_column_index]
+        else:
+            self._active_column_index=0
+
+        self._columns.insert(self._active_column_index, (left_column, left_column_boxes, left_column_text))
+        self._columns.insert(self._active_column_index+1, (right_column, right_column_boxes, right_column_text))
+
+        self._left_border, self._right_border, self._top_border, self._bottom_border=None, None, None, None
+    def switch_to_previous_column(self):
+        assert self.has_columns
+
+        self._active_column_index-=1
+        if self._active_column_index<0:
+            self._active_column_index=len(self._columns)-1
+
+        self._left_border, self._right_border, self._top_border, self._bottom_border=None, None, None, None
+    def switch_to_next_column(self):
+        assert self.has_columns
+
+        self._active_column_index+=1
+        self._active_column_index%=len(self._columns)
+
+        self._left_border, self._right_border, self._top_border, self._bottom_border=None, None, None, None
+    def cancel_columns(self):
+        self._columns=[]
+
+        self._left_border, self._right_border, self._top_border, self._bottom_border=None, None, None, None
+
     def _check_coordinates(self, row, column):
 
-        if row<0 or row>=len(self._image_boxes):
-            raise ValueError(f"Row {row} out of range, {len(self._image_boxes)} available.")
-        if column<0 or column>=len(self._image_boxes[row]):
-            raise ValueError(""f"Column {column} out of range, {len(self._image_boxes[row])} available.")
+        if row<0 or row>=len(self.image_boxes):
+            raise ValueError(f"Row {row} out of range, {len(self.image_boxes)} available.")
+        if column<0 or column>=len(self.image_boxes[row]):
+            raise ValueError(""f"Column {column} out of range, {len(self.image_boxes[row])} available.")
 
 class LinuxSpeech:
 
@@ -660,6 +730,11 @@ class MainWindow(wx.Frame):
     RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID=71
     RECOGNIZE_FULL_IMAGE_MENU_ITEM_ID=72
 
+    SPLIT_TO_COLUMNS_MENU_ITEM_ID=101
+    SWITCH_TO_PREVIOUS_COLUMN_MENU_ITEM_ID=102
+    SWITCH_TO_NEXT_COLUMN_MENU_ITEM_ID=103
+    CANCEL_COLUMNS_MENU_ITEM_ID=104
+
     def __init__(self):
         super().__init__(parent=None)
 
@@ -684,6 +759,7 @@ class MainWindow(wx.Frame):
         menu_bar=wx.MenuBar()
         menu_bar.Append(self._construct_file_menu(), "&File")
         menu_bar.Append(self._construct_borders_menu(), "&Borders")
+        menu_bar.Append(self._construct_columns_menu(), "&Columns")
         menu_bar.Append(self._construct_recognition_menu(), "&Recognition")
         menu_bar.Append(self._construct_help_menu(), "&Help")
 
@@ -738,6 +814,23 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self._switch_vertical_borders_menu_item_click, id=MainWindow.SWITCH_VERTICAL_BORDERS_MENU_ITEM_ID)
 
         return borders_menu
+    def _construct_columns_menu(self):
+
+        columns_menu=wx.Menu()
+
+        columns_menu.Append(MainWindow.SPLIT_TO_COLUMNS_MENU_ITEM_ID, "Split to columns")
+        columns_menu.Append(MainWindow.SWITCH_TO_PREVIOUS_COLUMN_MENU_ITEM_ID, "Switch to previous column\tAlt+Left")
+        columns_menu.Append(MainWindow.SWITCH_TO_NEXT_COLUMN_MENU_ITEM_ID, "Switch to next column\tAlt+Right")
+        columns_menu.Append(MainWindow.CANCEL_COLUMNS_MENU_ITEM_ID, "Cancel columns")
+
+        # Events
+
+        self.Bind(wx.EVT_MENU, self._split_to_columns_menu_item_click, id=MainWindow.SPLIT_TO_COLUMNS_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._switch_to_previous_column_menu_item_click, id=MainWindow.SWITCH_TO_PREVIOUS_COLUMN_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._switch_to_next_column_menu_item_click, id=MainWindow.SWITCH_TO_NEXT_COLUMN_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._cancel_columns_menu_item_click, id=MainWindow.CANCEL_COLUMNS_MENU_ITEM_ID)
+
+        return columns_menu
     def _construct_recognition_menu(self):
 
         recognition_menu=wx.Menu()
@@ -759,7 +852,8 @@ class MainWindow(wx.Frame):
 
         return help_menu
     def _set_window_title(self):
-        self.SetTitle(f"{self._math_scanner.file_name} - Math scanner")
+        title=f"{self._math_scanner.file_name} - Math scanner" if not self._math_scanner.has_columns else f"{self._math_scanner.file_name} {self._math_scanner.active_column_index+1}/{self._math_scanner.column_count} - Math scanner"
+        self.SetTitle(title)
 
     # Event methods
 
@@ -873,6 +967,25 @@ class MainWindow(wx.Frame):
             wx.MessageBox(json_response, "Json response")
     def _recognize_full_image_menu_item_click(self, event):
         print("click2")
+
+    def _split_to_columns_menu_item_click(self, event):
+        self._math_scanner.split_to_columns()
+        self._image_text_TextCtrl.SetValue(self._math_scanner.image_text)
+        self._set_window_title()
+    def _switch_to_previous_column_menu_item_click(self, event):
+        if self._math_scanner.has_columns:
+            self._math_scanner.switch_to_previous_column()
+            self._image_text_TextCtrl.SetValue(self._math_scanner.image_text)
+            self._set_window_title()
+    def _switch_to_next_column_menu_item_click(self, event):
+        if self._math_scanner.has_columns:
+            self._math_scanner.switch_to_next_column()
+            self._image_text_TextCtrl.SetValue(self._math_scanner.image_text)
+            self._set_window_title()
+    def _cancel_columns_menu_item_click(self, event):
+        self._math_scanner.cancel_columns()
+        self._image_text_TextCtrl.SetValue(self._math_scanner.image_text)
+        self._set_window_title()
 
     def _main_window_close(self, event):
         self._speech.release()
