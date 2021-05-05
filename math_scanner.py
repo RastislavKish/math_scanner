@@ -593,9 +593,9 @@ class MathScanner:
         return False
 
     def switch_horizontal_borders(self):
-        self._left_border, self._right_border=self._right_border, self._left_border
-    def switch_vertical_borders(self):
         self._top_border, self._bottom_border=self._bottom_border, self._top_border
+    def switch_vertical_borders(self):
+        self._left_border, self._right_border=self._right_border, self._left_border
 
     def get_bordered_region(self):
         assert self.image!=None
@@ -728,7 +728,6 @@ class MainWindow(wx.Frame):
     SWITCH_VERTICAL_BORDERS_MENU_ITEM_ID=41
 
     RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID=71
-    RECOGNIZE_FULL_IMAGE_MENU_ITEM_ID=72
 
     SPLIT_TO_COLUMNS_MENU_ITEM_ID=101
     SWITCH_TO_PREVIOUS_COLUMN_MENU_ITEM_ID=102
@@ -772,6 +771,8 @@ class MainWindow(wx.Frame):
 
         file_menu.Append(MainWindow.OPEN_MENU_ITEM_ID, "Open\tCtrl+O")
         file_menu.Append(wx.ID_EXIT, "Exit")
+
+        # Events
 
         self.Bind(wx.EVT_MENU, self._open_menu_item_click, id=MainWindow.OPEN_MENU_ITEM_ID)
         self.Bind(wx.EVT_MENU, self._exit_menu_item_click, id=wx.ID_EXIT)
@@ -836,12 +837,10 @@ class MainWindow(wx.Frame):
         recognition_menu=wx.Menu()
 
         recognition_menu.Append(MainWindow.RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID, "Recognize bordered region")
-        recognition_menu.Append(MainWindow.RECOGNIZE_FULL_IMAGE_MENU_ITEM_ID, "Recognize full image")
 
         # Events
 
         self.Bind(wx.EVT_MENU, self._recognize_bordered_region_menu_item_click, id=MainWindow.RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID)
-        self.Bind(wx.EVT_MENU, self._recognize_full_image_menu_item_click, id=MainWindow.RECOGNIZE_FULL_IMAGE_MENU_ITEM_ID)
 
         return recognition_menu
     def _construct_help_menu(self):
@@ -849,6 +848,10 @@ class MainWindow(wx.Frame):
         help_menu=wx.Menu()
 
         help_menu.Append(wx.ID_ABOUT, "About")
+
+        # Events
+
+        self.Bind(wx.EVT_MENU, self._about_menu_item_click, id=wx.ID_ABOUT)
 
         return help_menu
     def _set_window_title(self):
@@ -987,6 +990,9 @@ class MainWindow(wx.Frame):
         self._image_text_TextCtrl.SetValue(self._math_scanner.image_text)
         self._set_window_title()
 
+    def _about_menu_item_click(self, event):
+        wx.MessageBox("Math scanner 1.0\nCopyleft 2021 Rastislav Kish\nThis program is licensed under the terms of the GNU General Public License version 3.", caption="About", style=wx.CENTRE | wx.ICON_INFORMATION)
+
     def _main_window_close(self, event):
         self._speech.release()
 
@@ -1012,8 +1018,9 @@ class MainWindow(wx.Frame):
                 self._settings.load(p)
                 break
 
-app=wx.App(False)
-main_window=MainWindow()
-main_window.Show(True)
-app.MainLoop()
+if __name__=="__main__":
+    app=wx.App(False)
+    main_window=MainWindow()
+    main_window.Show(True)
+    app.MainLoop()
 
