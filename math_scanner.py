@@ -597,6 +597,73 @@ class MathScanner:
     def switch_vertical_borders(self):
         self._left_border, self._right_border=self._right_border, self._left_border
 
+    def left_edge_distance(self, row, column):
+        self._check_coordinates(row, column)
+
+        image_width=self.image.size[0]
+        character_box=self.image_boxes[row][column]
+        distance=character_box.bottom_left_x
+
+        return int(distance/image_width*100)
+    def right_edge_distance(self, row, column):
+        self._check_coordinates(row, column)
+
+        image_width=self.image.size[0]
+        character_box=self.image_boxes[row][column]
+        distance=image_width-character_box.top_right_x
+
+        return int(distance/image_width*100)
+    def top_edge_distance(self, row, column):
+        self._check_coordinates(row, column)
+
+        image_height=self.image.size[1]
+        character_box=self.image_boxes[row][column]
+        distance=image_height-character_box.top_right_y
+
+        return int(distance/image_height*100)
+    def bottom_edge_distance(self, row, column):
+        self._check_coordinates(row, column)
+
+        image_height=self.image.size[1]
+        character_box=self.image_boxes[row][column]
+        distance=character_box.bottom_left_y
+
+        return int(distance/image_height*100)
+
+    def bordered_region_width(self):
+
+        image_width=self.image.size[0]
+        if self._left_border==None or self._right_border==None:
+            left_border=self._left_border if self._left_border!=None else 0
+            right_border=self._right_border if self._right_border!=None else image_width
+        else:
+            left_border, right_border=(self._left_border, self._right_border) if self._left_border<self._right_border else (self._right_border, self._left_border)
+
+        return int((right_border-left_border)/image_width*100)
+    def bordered_region_height(self):
+
+        image_height=self.image.size[1]
+        if self._top_border==None or self._bottom_border==None:
+            top_border=self._top_border if self._top_border!=None else image_height
+            bottom_border=self._bottom_border if self._bottom_border!=None else 0
+        else:
+            top_border, bottom_border=(self._top_border, self._bottom_border) if self._top_border>self._bottom_border else (self._bottom_border, self._top_border)
+
+        return int((top_border-bottom_border)/image_height*100)
+
+    def character_width(self, row, column):
+        self._check_coordinates(row, column)
+
+        character_box=self.image_boxes[row][column]
+
+        return character_box.top_right_x-character_box.bottom_left_x
+    def character_height(self, row, column):
+        self._check_coordinates(row, column)
+
+        character_box=self.image_boxes[row][column]
+
+        return character_box.top_right_y-character_box.bottom_left_y
+
     def get_bordered_region(self):
         assert self.image!=None
 
@@ -727,6 +794,15 @@ class MainWindow(wx.Frame):
     SWITCH_HORIZONTAL_BORDERS_MENU_ITEM_ID=40
     SWITCH_VERTICAL_BORDERS_MENU_ITEM_ID=41
 
+    LEFT_EDGE_DISTANCE_MENU_ITEM_ID=51
+    RIGHT_EDGE_DISTANCE_MENU_ITEM_ID=52
+    TOP_EDGE_DISTANCE_MENU_ITEM_ID=53
+    BOTTOM_EDGE_DISTANCE_MENU_ITEM_ID=54
+    BORDERED_REGION_WIDTH_MENU_ITEM_ID=55
+    BORDERED_REGION_HEIGHT_MENU_ITEM_ID=56
+    CHARACTER_WIDTH_MENU_ITEM_ID=57
+    CHARACTER_HEIGHT_MENU_ITEM_ID=58
+
     RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID=71
     SAVE_BORDERED_REGION_MENU_ITEM_ID=72
 
@@ -760,6 +836,7 @@ class MainWindow(wx.Frame):
         menu_bar.Append(self._construct_file_menu(), "&File")
         menu_bar.Append(self._construct_borders_menu(), "&Borders")
         menu_bar.Append(self._construct_columns_menu(), "&Columns")
+        menu_bar.Append(self._construct_say_menu(), "&Say")
         menu_bar.Append(self._construct_recognition_menu(), "&Recognition")
         menu_bar.Append(self._construct_help_menu(), "&Help")
 
@@ -833,6 +910,31 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self._cancel_columns_menu_item_click, id=MainWindow.CANCEL_COLUMNS_MENU_ITEM_ID)
 
         return columns_menu
+    def _construct_say_menu(self):
+
+        say_menu=wx.Menu()
+
+        say_menu.Append(MainWindow.LEFT_EDGE_DISTANCE_MENU_ITEM_ID, "Left edge distance\tAlt+Shift+Left")
+        say_menu.Append(MainWindow.RIGHT_EDGE_DISTANCE_MENU_ITEM_ID, "Right edge distance\tAlt+Shift+Right")
+        say_menu.Append(MainWindow.TOP_EDGE_DISTANCE_MENU_ITEM_ID, "Top edge distance\tAlt+Shift+Up")
+        say_menu.Append(MainWindow.BOTTOM_EDGE_DISTANCE_MENU_ITEM_ID, "Bottom edge distance\tAlt+Shift+Down")
+
+        say_menu.Append(MainWindow.BORDERED_REGION_WIDTH_MENU_ITEM_ID, "Bordered region width\tCtrl+W")
+        say_menu.Append(MainWindow.BORDERED_REGION_HEIGHT_MENU_ITEM_ID, "Bordered region height\tCtrl+H")
+        say_menu.Append(MainWindow.CHARACTER_WIDTH_MENU_ITEM_ID, "Character width\tCtrl+Shift+W")
+        say_menu.Append(MainWindow.CHARACTER_HEIGHT_MENU_ITEM_ID, "Character Height\tCtrl+Shift+H")
+
+        self.Bind(wx.EVT_MENU, self._left_edge_distance_menu_item_click, id=MainWindow.LEFT_EDGE_DISTANCE_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._right_edge_distance_menu_item_click, id=MainWindow.RIGHT_EDGE_DISTANCE_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._top_edge_distance_menu_item_click, id=MainWindow.TOP_EDGE_DISTANCE_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._bottom_edge_distance_menu_item_click, id=MainWindow.BOTTOM_EDGE_DISTANCE_MENU_ITEM_ID)
+
+        self.Bind(wx.EVT_MENU, self._bordered_region_width_menu_item_click, id=MainWindow.BORDERED_REGION_WIDTH_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._bordered_region_height_menu_item_click, id=MainWindow.BORDERED_REGION_HEIGHT_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._character_width_menu_item_click, id=MainWindow.CHARACTER_WIDTH_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._character_height_menu_item_click, id=MainWindow.CHARACTER_HEIGHT_MENU_ITEM_ID)
+
+        return say_menu
     def _construct_recognition_menu(self):
 
         recognition_menu=wx.Menu()
@@ -938,6 +1040,29 @@ class MainWindow(wx.Frame):
         self._math_scanner.switch_vertical_borders()
 
         self._speech.speak("Switched")
+
+    def _left_edge_distance_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.left_edge_distance(row, column)}%")
+    def _right_edge_distance_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.right_edge_distance(row, column)}%")
+    def _top_edge_distance_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.top_edge_distance(row, column)}%")
+    def _bottom_edge_distance_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.bottom_edge_distance(row, column)}%")
+    def _bordered_region_width_menu_item_click(self, event):
+        self._speech.speak(f"{self._math_scanner.bordered_region_width()}")
+    def _bordered_region_height_menu_item_click(self, event):
+        self._speech.speak(f"{self._math_scanner.bordered_region_height()}")
+    def _character_width_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.character_width(row, column)}")
+    def _character_height_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.character_height(row, column)}")
 
     def _recognize_bordered_region_menu_item_click(self, event):
         img=self._math_scanner.get_bordered_region()
