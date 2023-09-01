@@ -728,6 +728,7 @@ class MainWindow(wx.Frame):
     SWITCH_VERTICAL_BORDERS_MENU_ITEM_ID=41
 
     RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID=71
+    SAVE_BORDERED_REGION_MENU_ITEM_ID=72
 
     SPLIT_TO_COLUMNS_MENU_ITEM_ID=101
     SWITCH_TO_PREVIOUS_COLUMN_MENU_ITEM_ID=102
@@ -837,10 +838,12 @@ class MainWindow(wx.Frame):
         recognition_menu=wx.Menu()
 
         recognition_menu.Append(MainWindow.RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID, "Recognize bordered region")
+        recognition_menu.Append(MainWindow.SAVE_BORDERED_REGION_MENU_ITEM_ID, "Save bordered region")
 
         # Events
 
         self.Bind(wx.EVT_MENU, self._recognize_bordered_region_menu_item_click, id=MainWindow.RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._save_bordered_region_menu_item_click, id=self.SAVE_BORDERED_REGION_MENU_ITEM_ID)
 
         return recognition_menu
     def _construct_help_menu(self):
@@ -968,8 +971,17 @@ class MainWindow(wx.Frame):
 
         if dialog.ShowModal()==wx.ID_CANCEL:
             wx.MessageBox(json_response, "Json response")
-    def _recognize_full_image_menu_item_click(self, event):
-        print("click2")
+    def _save_bordered_region_menu_item_click(self, event):
+
+        with wx.FileDialog(self, "Save bordered region", style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT) as file_dialog:
+
+            if file_dialog.ShowModal()==wx.ID_CANCEL:
+                return
+
+            img=self._math_scanner.get_bordered_region()
+            path=file_dialog.GetPath()
+
+            img.save(path, format="png")
 
     def _split_to_columns_menu_item_click(self, event):
         self._math_scanner.split_to_columns()
