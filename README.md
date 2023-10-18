@@ -1,6 +1,16 @@
 # Math scanner
 
-Reading mathematical expressions in images with screenreaders has been always difficult. Available OCR programs have over time get very good at recognizing ordinary text, but the space notation used by mathematics is still difficult to read for them.
+## Note
+
+Since the initial release of math_scanner, Mathpix advanced quite significantly, introducing new services, new API and new functions along considerable quality improvements. Right now, it provides decent document recognition, making math snipping no longer necessary.
+
+math_scanner is still available as an interesting experiment in blind image cropping and manipulation, as well as a base for further experimentation in the area of communicating the text layout and structure of documents to blind users.
+
+Of course, the math recognition functionality is still available.
+
+---
+
+Reading mathematical expressions in images with screenreaders has been always difficult. Available OCR programs have over time got very good at recognizing ordinary text, but the space notation used by mathematics is still difficult to read for them.
 
 Meanwhile, a promising new service, [Mathpix](https://mathpix.com/) has appeared, offering quick and very accurate deep learning based recognition of not just mathematical expressions and equations, but also other scientific figures such as tables, chemical diagrams and various kinds of formatting. While this seemed like a way to go for screenreaders, there was one major drawback. Mathpix requires a cropped image of the formula or figure to be transcribed, one can't just enter a page and get the desired results.
 
@@ -17,7 +27,12 @@ The app is currently mostly a proof of concept, but it's already functional and 
 In order to work properly, Math scanner needs some dependencies to be installed.
 
 First of all, install the necessary libraries:\
-```pip3 install appdirs pillow pytesseract pyyaml```
+```pip3 install appdirs pillow pytesseract pyyaml requests```
+
+on Linux or:\
+```pip install appdirs pillow pytesseract pyyaml requests```
+
+On Windows.
 
 You can also try to install WXPython in this way, but at least in my case, despite my effort I was not able to get it to compile properly. Thus I recommend installing one of the [pre-build wheels,](https://wxpython.org/pages/downloads/index.html) if you want to save time and nerves.
 
@@ -25,9 +40,11 @@ The last dependencies you need are Speech dispatcher (on Linux) and Tesseract. I
 
 The way you install Tesseract doesn't matter much. It just has to be executable by ```tesseract``` command, so make sure it's installed on a visible place or included in path.
 
+On Windows, you need the [Tolk library](https://github.com/dkager/tolk) for the speech support.
+
 ### Setting up Mathpix OCR api
 
-Another thing you need before using Math scanner is a working pair of Mathpix app ID and App key.
+Another thing you need before using Math scanner (if you want to perform math recognition) is a working pair of Mathpix app ID and App key.
 
 To get these, visit the [Mathpix's official page](https://mathpix.com/) and create an account.
 
@@ -42,7 +59,7 @@ After setting up the API, save the App ID and App key. Youll need them in Math s
 Math scanner is currently really a single Python script.
 
 On a Linux system, you'll probably want to make it executable:\
-```chmod u+x math_scanner.py```
+```chmod +x math_scanner.py```
 
 And may be also install it to your bin directory (omitting the extension for convenience):\
 ```sudo cp math_scanner.py /usr/bin/math_scanner```
@@ -178,20 +195,6 @@ grayscale | Converts the image to grayscale | Boolean (yes or no) | no
 blackwhite | Everything under a given threshold is casted to black, the rest to white | Boolean (yes or no) | no
 blackwhite threshold | The threshold for blackwhite function | Number from 0 to 255 including | 200
 
-### speech
-
-Configures the speech parameters. The speech system used on Linux is Speech dispatcher.
-
-Parameter | Description | Value | Default
---- | --- | --- | ---
-speech module | The speech module to use | The module's name | espeak-ng
-language | The language of the speech | Depends on the speech module, but usually two letter code like en, sk or de | en
-voice | Name of the voice to be used | String | male1
-punctuation mode | Defines the level of pronouncing punctuation by the speech module | none, some or all | some
-pitch | The pitch of the speech | Number from -100 to 100 | 10
-rate | The rate of the speech | Number from -100 to 100 | 2
-volume | The volume of the speech | Number from -100 to 100 | 100
-
 ## Final notes
 
 ### Limitations
@@ -203,9 +206,7 @@ As stated on the beginning, this app is for now mostly a proof of concept. While
 
 ### Platforms
 
-Currently, Math scanner is primarily for Linux. However, the code is written in a mostly crossplatform way and it technically could be used on other platforms as well with minimal changes.
+Currently, Math scanner supports Linux and Windows. However, the code is written in a mostly crossplatform way and it technically could be used on other platforms as well with minimal changes.
 
-If you want to do so, you have two options:
-* Provide a speech class for your platform, following the methods of LinuxSpeech class. Then comment out the speechd import and in MainWindow, replace LinuxSpeech initialization of self._speech with your class.
-* Comment out the speechd import as well as everything with self._speech. This way you will lose the speech, but the program should work, so it's upto you how important is it.
+If you want to do so, you can provide a speech class for your platform, following the methods of LinuxSpeech class. Then in MainWindow, replace LinuxSpeech initialization of self._speech with your class.
 
