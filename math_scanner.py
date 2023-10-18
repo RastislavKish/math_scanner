@@ -104,32 +104,6 @@ class MathpixConfiguration:
 
         if len(formats)>0:
             self.formats=formats
-class SpeechConfiguration:
-
-    def __init__(self, speech_module="espeak-ng", language="en", voice="male1", punctuation_mode="some", pitch=10, rate=2, volume=100):
-
-        self.speech_module=speech_module
-        self.language=language
-        self.voice=voice
-        self.punctuation_mode=punctuation_mode
-        self.pitch=pitch
-        self.rate=rate
-        self.volume=volume
-
-    def set_speech_module(self, speech_module):
-        self.speech_module=speech_module
-    def set_language(self, language):
-        self.language=language
-    def set_voice(self, voice):
-        self.voice=voice
-    def set_punctuation_mode(self, punctuation_mode):
-        self.punctuation_mode=punctuation_mode
-    def set_pitch(self, pitch):
-        self.pitch=pitch
-    def set_rate(self, rate):
-        self.rate=rate
-    def set_volume(self, volume):
-        self.volume=volume
 class TesseractConfiguration:
 
     def __init__(self, data_directory=None, recognition_language="eng", ocr_engine_mode=3):
@@ -162,7 +136,6 @@ class Settings:
         self.tesseract_configuration=TesseractConfiguration()
         self.input_image_processing_configuration=ImageProcessingConfiguration(active=False)
         self.output_image_processing_configuration=ImageProcessingConfiguration(active=False)
-        self.speech_configuration=SpeechConfiguration()
 
         self._setting_getter_result=None # A helper variable for retrieving settings from configuration file
 
@@ -175,7 +148,6 @@ class Settings:
             if self._get_tesseract_configuration(doc, "tesseract"): self.tesseract_configuration=self._setting_getter_result
             if self._get_image_processing_configuration(doc, "input image processing"): self.input_image_processing_configuration=self._setting_getter_result
             if self._get_image_processing_configuration(doc, "output image processing"): self.output_image_processing_configuration=self._setting_getter_result
-            if self._get_speech_configuration(doc, "speech"): self.speech_configuration=self._setting_getter_result
 
     def _get_image_processing_configuration(self, yaml_node, key_name):
         if key_name in yaml_node:
@@ -205,24 +177,6 @@ class Settings:
             if self._get_str(mathpix_node, "app id"): result.set_app_id(self._setting_getter_result)
             if self._get_str(mathpix_node, "app key"): result.set_app_key(self._setting_getter_result)
             if self._get_list(mathpix_node, "formats"): result.set_formats(self._setting_getter_result)
-
-            self._setting_getter_result=result
-
-            return True
-
-        return False
-    def _get_speech_configuration(self, yaml_node, key_name):
-        if key_name in yaml_node:
-            result=SpeechConfiguration()
-            speech_node=yaml_node[key_name]
-
-            if self._get_str(speech_node, "speech module"): result.set_speech_module(self._setting_getter_result)
-            if self._get_str(speech_node, "language"): result.set_language(self._setting_getter_result)
-            if self._get_str(speech_node, "voice"): result.set_voice(self._setting_getter_result)
-            if self._get_str(speech_node, "punctuation mode"): result.set_punctuation_mode(self._setting_getter_result)
-            if self._get_int(speech_node, "pitch"): result.set_pitch(self._setting_getter_result)
-            if self._get_int(speech_node, "rate"): result.set_rate(self._setting_getter_result)
-            if self._get_int(speech_node, "volume"): result.set_volume(self._setting_getter_result)
 
             self._setting_getter_result=result
 
@@ -752,21 +706,8 @@ class MathScanner:
 
 class LinuxSpeech:
 
-    def __init__(self, configuration=None):
+    def __init__(self):
         self._connection=SSIPClient("math_scanner")
-
-        self.configure(configuration)
-
-    def configure(self, configuration):
-
-        if self._connection!=None and configuration!=None:
-            self._connection.set_output_module(configuration.speech_module)
-            self._connection.set_language(configuration.language)
-            self._connection.set_voice(configuration.voice)
-            self._connection.set_punctuation(configuration.punctuation_mode)
-            self._connection.set_pitch(configuration.pitch)
-            self._connection.set_rate(configuration.rate)
-            self._connection.set_volume(configuration.volume)
 
     def speak(self, text):
         self._connection.speak(text)
@@ -817,7 +758,7 @@ class MainWindow(wx.Frame):
         self._settings=Settings()
         self._load_settings()
 
-        self._speech=LinuxSpeech(self._settings.speech_configuration)
+        self._speech=LinuxSpeech()
 
         self._math_scanner=MathScanner(self._settings)
 
