@@ -1,15 +1,33 @@
 #!/usr/bin/python3
 
+# Copyright (C) 2021 Rastislav Kish
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, version 3.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
 from base64 import b64encode
 from io import BytesIO
 import json
 from os import path
+import platform
 import requests
 import sys
 
 import appdirs
 from PIL import Image, ImageOps
-from speechd.client import SSIPClient
+if platform.system()=="Linux":
+    from speechd.client import SSIPClient
+elif platform.system()=="Windows":
+    from cytolk import tolk
 import pytesseract
 import wx
 import yaml
@@ -104,32 +122,6 @@ class MathpixConfiguration:
 
         if len(formats)>0:
             self.formats=formats
-class SpeechConfiguration:
-
-    def __init__(self, speech_module="espeak-ng", language="en", voice="male1", punctuation_mode="some", pitch=10, rate=2, volume=100):
-
-        self.speech_module=speech_module
-        self.language=language
-        self.voice=voice
-        self.punctuation_mode=punctuation_mode
-        self.pitch=pitch
-        self.rate=rate
-        self.volume=volume
-
-    def set_speech_module(self, speech_module):
-        self.speech_module=speech_module
-    def set_language(self, language):
-        self.language=language
-    def set_voice(self, voice):
-        self.voice=voice
-    def set_punctuation_mode(self, punctuation_mode):
-        self.punctuation_mode=punctuation_mode
-    def set_pitch(self, pitch):
-        self.pitch=pitch
-    def set_rate(self, rate):
-        self.rate=rate
-    def set_volume(self, volume):
-        self.volume=volume
 class TesseractConfiguration:
 
     def __init__(self, data_directory=None, recognition_language="eng", ocr_engine_mode=3):
@@ -162,7 +154,6 @@ class Settings:
         self.tesseract_configuration=TesseractConfiguration()
         self.input_image_processing_configuration=ImageProcessingConfiguration(active=False)
         self.output_image_processing_configuration=ImageProcessingConfiguration(active=False)
-        self.speech_configuration=SpeechConfiguration()
 
         self._setting_getter_result=None # A helper variable for retrieving settings from configuration file
 
@@ -175,7 +166,6 @@ class Settings:
             if self._get_tesseract_configuration(doc, "tesseract"): self.tesseract_configuration=self._setting_getter_result
             if self._get_image_processing_configuration(doc, "input image processing"): self.input_image_processing_configuration=self._setting_getter_result
             if self._get_image_processing_configuration(doc, "output image processing"): self.output_image_processing_configuration=self._setting_getter_result
-            if self._get_speech_configuration(doc, "speech"): self.speech_configuration=self._setting_getter_result
 
     def _get_image_processing_configuration(self, yaml_node, key_name):
         if key_name in yaml_node:
@@ -205,24 +195,6 @@ class Settings:
             if self._get_str(mathpix_node, "app id"): result.set_app_id(self._setting_getter_result)
             if self._get_str(mathpix_node, "app key"): result.set_app_key(self._setting_getter_result)
             if self._get_list(mathpix_node, "formats"): result.set_formats(self._setting_getter_result)
-
-            self._setting_getter_result=result
-
-            return True
-
-        return False
-    def _get_speech_configuration(self, yaml_node, key_name):
-        if key_name in yaml_node:
-            result=SpeechConfiguration()
-            speech_node=yaml_node[key_name]
-
-            if self._get_str(speech_node, "speech module"): result.set_speech_module(self._setting_getter_result)
-            if self._get_str(speech_node, "language"): result.set_language(self._setting_getter_result)
-            if self._get_str(speech_node, "voice"): result.set_voice(self._setting_getter_result)
-            if self._get_str(speech_node, "punctuation mode"): result.set_punctuation_mode(self._setting_getter_result)
-            if self._get_int(speech_node, "pitch"): result.set_pitch(self._setting_getter_result)
-            if self._get_int(speech_node, "rate"): result.set_rate(self._setting_getter_result)
-            if self._get_int(speech_node, "volume"): result.set_volume(self._setting_getter_result)
 
             self._setting_getter_result=result
 
@@ -597,6 +569,73 @@ class MathScanner:
     def switch_vertical_borders(self):
         self._left_border, self._right_border=self._right_border, self._left_border
 
+    def left_edge_distance(self, row, column):
+        self._check_coordinates(row, column)
+
+        image_width=self.image.size[0]
+        character_box=self.image_boxes[row][column]
+        distance=character_box.bottom_left_x
+
+        return int(distance/image_width*100)
+    def right_edge_distance(self, row, column):
+        self._check_coordinates(row, column)
+
+        image_width=self.image.size[0]
+        character_box=self.image_boxes[row][column]
+        distance=image_width-character_box.top_right_x
+
+        return int(distance/image_width*100)
+    def top_edge_distance(self, row, column):
+        self._check_coordinates(row, column)
+
+        image_height=self.image.size[1]
+        character_box=self.image_boxes[row][column]
+        distance=image_height-character_box.top_right_y
+
+        return int(distance/image_height*100)
+    def bottom_edge_distance(self, row, column):
+        self._check_coordinates(row, column)
+
+        image_height=self.image.size[1]
+        character_box=self.image_boxes[row][column]
+        distance=character_box.bottom_left_y
+
+        return int(distance/image_height*100)
+
+    def bordered_region_width(self):
+
+        image_width=self.image.size[0]
+        if self._left_border==None or self._right_border==None:
+            left_border=self._left_border if self._left_border!=None else 0
+            right_border=self._right_border if self._right_border!=None else image_width
+        else:
+            left_border, right_border=(self._left_border, self._right_border) if self._left_border<self._right_border else (self._right_border, self._left_border)
+
+        return int((right_border-left_border)/image_width*100)
+    def bordered_region_height(self):
+
+        image_height=self.image.size[1]
+        if self._top_border==None or self._bottom_border==None:
+            top_border=self._top_border if self._top_border!=None else image_height
+            bottom_border=self._bottom_border if self._bottom_border!=None else 0
+        else:
+            top_border, bottom_border=(self._top_border, self._bottom_border) if self._top_border>self._bottom_border else (self._bottom_border, self._top_border)
+
+        return int((top_border-bottom_border)/image_height*100)
+
+    def character_width(self, row, column):
+        self._check_coordinates(row, column)
+
+        character_box=self.image_boxes[row][column]
+
+        return character_box.top_right_x-character_box.bottom_left_x
+    def character_height(self, row, column):
+        self._check_coordinates(row, column)
+
+        character_box=self.image_boxes[row][column]
+
+        return character_box.top_right_y-character_box.bottom_left_y
+
     def get_bordered_region(self):
         assert self.image!=None
 
@@ -685,21 +724,8 @@ class MathScanner:
 
 class LinuxSpeech:
 
-    def __init__(self, configuration=None):
+    def __init__(self):
         self._connection=SSIPClient("math_scanner")
-
-        self.configure(configuration)
-
-    def configure(self, configuration):
-
-        if self._connection!=None and configuration!=None:
-            self._connection.set_output_module(configuration.speech_module)
-            self._connection.set_language(configuration.language)
-            self._connection.set_voice(configuration.voice)
-            self._connection.set_punctuation(configuration.punctuation_mode)
-            self._connection.set_pitch(configuration.pitch)
-            self._connection.set_rate(configuration.rate)
-            self._connection.set_volume(configuration.volume)
 
     def speak(self, text):
         self._connection.speak(text)
@@ -707,6 +733,16 @@ class LinuxSpeech:
     def release(self):
         self._connection.close()
         self._connection=None
+class WindowsSpeech:
+
+    def __init__(self, configuration=None):
+        tolk.load()
+
+    def speak(self, text):
+        tolk.speak(text)
+
+    def release(self):
+        tolk.unload()
 
 class MainWindow(wx.Frame):
 
@@ -727,7 +763,17 @@ class MainWindow(wx.Frame):
     SWITCH_HORIZONTAL_BORDERS_MENU_ITEM_ID=40
     SWITCH_VERTICAL_BORDERS_MENU_ITEM_ID=41
 
+    LEFT_EDGE_DISTANCE_MENU_ITEM_ID=51
+    RIGHT_EDGE_DISTANCE_MENU_ITEM_ID=52
+    TOP_EDGE_DISTANCE_MENU_ITEM_ID=53
+    BOTTOM_EDGE_DISTANCE_MENU_ITEM_ID=54
+    BORDERED_REGION_WIDTH_MENU_ITEM_ID=55
+    BORDERED_REGION_HEIGHT_MENU_ITEM_ID=56
+    CHARACTER_WIDTH_MENU_ITEM_ID=57
+    CHARACTER_HEIGHT_MENU_ITEM_ID=58
+
     RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID=71
+    SAVE_BORDERED_REGION_MENU_ITEM_ID=72
 
     SPLIT_TO_COLUMNS_MENU_ITEM_ID=101
     SWITCH_TO_PREVIOUS_COLUMN_MENU_ITEM_ID=102
@@ -740,7 +786,10 @@ class MainWindow(wx.Frame):
         self._settings=Settings()
         self._load_settings()
 
-        self._speech=LinuxSpeech(self._settings.speech_configuration)
+        if platform.system()=="Linux":
+            self._speech=LinuxSpeech()
+        elif platform.system()=="Windows":
+            self._speech=WindowsSpeech()
 
         self._math_scanner=MathScanner(self._settings)
 
@@ -759,6 +808,7 @@ class MainWindow(wx.Frame):
         menu_bar.Append(self._construct_file_menu(), "&File")
         menu_bar.Append(self._construct_borders_menu(), "&Borders")
         menu_bar.Append(self._construct_columns_menu(), "&Columns")
+        menu_bar.Append(self._construct_say_menu(), "&Say")
         menu_bar.Append(self._construct_recognition_menu(), "&Recognition")
         menu_bar.Append(self._construct_help_menu(), "&Help")
 
@@ -832,15 +882,42 @@ class MainWindow(wx.Frame):
         self.Bind(wx.EVT_MENU, self._cancel_columns_menu_item_click, id=MainWindow.CANCEL_COLUMNS_MENU_ITEM_ID)
 
         return columns_menu
+    def _construct_say_menu(self):
+
+        say_menu=wx.Menu()
+
+        say_menu.Append(MainWindow.LEFT_EDGE_DISTANCE_MENU_ITEM_ID, "Left edge distance\tAlt+Shift+Left")
+        say_menu.Append(MainWindow.RIGHT_EDGE_DISTANCE_MENU_ITEM_ID, "Right edge distance\tAlt+Shift+Right")
+        say_menu.Append(MainWindow.TOP_EDGE_DISTANCE_MENU_ITEM_ID, "Top edge distance\tAlt+Shift+Up")
+        say_menu.Append(MainWindow.BOTTOM_EDGE_DISTANCE_MENU_ITEM_ID, "Bottom edge distance\tAlt+Shift+Down")
+
+        say_menu.Append(MainWindow.BORDERED_REGION_WIDTH_MENU_ITEM_ID, "Bordered region width\tCtrl+W")
+        say_menu.Append(MainWindow.BORDERED_REGION_HEIGHT_MENU_ITEM_ID, "Bordered region height\tCtrl+H")
+        say_menu.Append(MainWindow.CHARACTER_WIDTH_MENU_ITEM_ID, "Character width\tCtrl+Shift+W")
+        say_menu.Append(MainWindow.CHARACTER_HEIGHT_MENU_ITEM_ID, "Character Height\tCtrl+Shift+H")
+
+        self.Bind(wx.EVT_MENU, self._left_edge_distance_menu_item_click, id=MainWindow.LEFT_EDGE_DISTANCE_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._right_edge_distance_menu_item_click, id=MainWindow.RIGHT_EDGE_DISTANCE_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._top_edge_distance_menu_item_click, id=MainWindow.TOP_EDGE_DISTANCE_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._bottom_edge_distance_menu_item_click, id=MainWindow.BOTTOM_EDGE_DISTANCE_MENU_ITEM_ID)
+
+        self.Bind(wx.EVT_MENU, self._bordered_region_width_menu_item_click, id=MainWindow.BORDERED_REGION_WIDTH_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._bordered_region_height_menu_item_click, id=MainWindow.BORDERED_REGION_HEIGHT_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._character_width_menu_item_click, id=MainWindow.CHARACTER_WIDTH_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._character_height_menu_item_click, id=MainWindow.CHARACTER_HEIGHT_MENU_ITEM_ID)
+
+        return say_menu
     def _construct_recognition_menu(self):
 
         recognition_menu=wx.Menu()
 
         recognition_menu.Append(MainWindow.RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID, "Recognize bordered region")
+        recognition_menu.Append(MainWindow.SAVE_BORDERED_REGION_MENU_ITEM_ID, "Save bordered region")
 
         # Events
 
         self.Bind(wx.EVT_MENU, self._recognize_bordered_region_menu_item_click, id=MainWindow.RECOGNIZE_BORDERED_REGION_MENU_ITEM_ID)
+        self.Bind(wx.EVT_MENU, self._save_bordered_region_menu_item_click, id=self.SAVE_BORDERED_REGION_MENU_ITEM_ID)
 
         return recognition_menu
     def _construct_help_menu(self):
@@ -936,6 +1013,29 @@ class MainWindow(wx.Frame):
 
         self._speech.speak("Switched")
 
+    def _left_edge_distance_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.left_edge_distance(row, column)}%")
+    def _right_edge_distance_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.right_edge_distance(row, column)}%")
+    def _top_edge_distance_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.top_edge_distance(row, column)}%")
+    def _bottom_edge_distance_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.bottom_edge_distance(row, column)}%")
+    def _bordered_region_width_menu_item_click(self, event):
+        self._speech.speak(f"{self._math_scanner.bordered_region_width()}")
+    def _bordered_region_height_menu_item_click(self, event):
+        self._speech.speak(f"{self._math_scanner.bordered_region_height()}")
+    def _character_width_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.character_width(row, column)}")
+    def _character_height_menu_item_click(self, event):
+        _, column, row=self._image_text_TextCtrl.PositionToXY(self._image_text_TextCtrl.GetInsertionPoint())
+        self._speech.speak(f"{self._math_scanner.character_height(row, column)}")
+
     def _recognize_bordered_region_menu_item_click(self, event):
         img=self._math_scanner.get_bordered_region()
 
@@ -968,8 +1068,17 @@ class MainWindow(wx.Frame):
 
         if dialog.ShowModal()==wx.ID_CANCEL:
             wx.MessageBox(json_response, "Json response")
-    def _recognize_full_image_menu_item_click(self, event):
-        print("click2")
+    def _save_bordered_region_menu_item_click(self, event):
+
+        with wx.FileDialog(self, "Save bordered region", style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT) as file_dialog:
+
+            if file_dialog.ShowModal()==wx.ID_CANCEL:
+                return
+
+            img=self._math_scanner.get_bordered_region()
+            path=file_dialog.GetPath()
+
+            img.save(path, format="png")
 
     def _split_to_columns_menu_item_click(self, event):
         self._math_scanner.split_to_columns()
