@@ -4,12 +4,16 @@ from base64 import b64encode
 from io import BytesIO
 import json
 from os import path
+import platform
 import requests
 import sys
 
 import appdirs
 from PIL import Image, ImageOps
-from speechd.client import SSIPClient
+if platform.system()=="Linux":
+    from speechd.client import SSIPClient
+elif platform.system()=="Windows":
+    from cytolk import tolk
 import pytesseract
 import wx
 import yaml
@@ -715,6 +719,16 @@ class LinuxSpeech:
     def release(self):
         self._connection.close()
         self._connection=None
+class WindowsSpeech:
+
+    def __init__(self, configuration=None):
+        tolk.load()
+
+    def speak(self, text):
+        tolk.speak(text)
+
+    def release(self):
+        tolk.unload()
 
 class MainWindow(wx.Frame):
 
@@ -758,7 +772,10 @@ class MainWindow(wx.Frame):
         self._settings=Settings()
         self._load_settings()
 
-        self._speech=LinuxSpeech()
+        if platform.system()=="Linux":
+            self._speech=LinuxSpeech()
+        elif platform.system()=="Windows":
+            self._speech=WindowsSpeech()
 
         self._math_scanner=MathScanner(self._settings)
 
