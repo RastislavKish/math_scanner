@@ -153,6 +153,10 @@ When you have your expression bordered, you can navigate to the Recognition menu
 
 The program will display a MessageBox with the result in the configured format. You can also view the full json response from here if you want.
 
+### Determining the text layout
+
+The Say menu in the program provides various functions useful for determining the text layout and document structure, like finding the distance of the focused character to the image edges (in %, starting on the character bounding box in the selected direction), or telling the character size as determined by Tesseract. User created columns are respected in the measures, providing additional flexibility.
+
 ## Configuration
 
 This section describes each object in the Math scanner configuration, its role and possible values.
